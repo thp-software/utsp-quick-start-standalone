@@ -112,17 +112,17 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
         // Define our game's color palette
         // Each color has an ID (0-255) and RGBA values
         const palette = [
-            { colorId: 0, r: 5, g: 5, b: 15, a: 255 },      // Deep space background
-            { colorId: 1, r: 40, g: 40, b: 60, a: 255 },    // Dim stars (far layer)
-            { colorId: 2, r: 80, g: 80, b: 120, a: 255 },   // Medium stars
-            { colorId: 3, r: 150, g: 150, b: 200, a: 255 }, // Bright stars (near layer)
-            { colorId: 4, r: 100, g: 200, b: 255, a: 255 }, // Ship cyan
-            { colorId: 5, r: 255, g: 150, b: 50, a: 255 },  // Ship orange (unused)
-            { colorId: 6, r: 140, g: 140, b: 140, a: 255 }, // Asteroid gray
-            { colorId: 7, r: 255, g: 255, b: 255, a: 255 }, // White text
-            { colorId: 8, r: 255, g: 220, b: 100, a: 255 }, // Score gold
-            { colorId: 9, r: 255, g: 80, b: 80, a: 255 },   // Game over red
-            { colorId: 10, r: 100, g: 100, b: 100, a: 255 }, // Lost heart gray
+            { colorId: 0, r: 5, g: 5, b: 15 },      // Deep space background
+            { colorId: 1, r: 40, g: 40, b: 60 },    // Dim stars (far layer)
+            { colorId: 2, r: 80, g: 80, b: 120 },   // Medium stars
+            { colorId: 3, r: 150, g: 150, b: 200 }, // Bright stars (near layer)
+            { colorId: 4, r: 100, g: 200, b: 255 }, // Ship cyan
+            { colorId: 5, r: 255, g: 150, b: 50 },  // Ship orange (unused)
+            { colorId: 6, r: 140, g: 140, b: 140 }, // Asteroid gray
+            { colorId: 7, r: 255, g: 255, b: 255 }, // White text
+            { colorId: 8, r: 255, g: 220, b: 100 }, // Score gold
+            { colorId: 9, r: 255, g: 80, b: 80 },   // Game over red
+            { colorId: 10, r: 100, g: 100, b: 100 }, // Lost heart gray
         ];
         // Load palette into slot 0 (displays can switch between palette slots)
         core.loadPaletteToSlot(0, palette);

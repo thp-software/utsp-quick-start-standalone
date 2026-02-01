@@ -10,9 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@utsp/types": "0.17.0-nightly.20260127111647.165f2b8",
-    "@utsp/core": "0.17.0-nightly.20260127111647.165f2b8",
-    "@utsp/runtime-client": "0.17.0-nightly.20260127111647.165f2b8",
+    "@utsp/types": "^0.17.3",
+    "@utsp/core": "^0.17.3",
+    "@utsp/runtime-client": "^0.17.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
