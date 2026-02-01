@@ -12,8 +12,7 @@
  */
 
 import { Core, User, Layer, Display, Vector2, OrderBuilder } from "@utsp/core";
-import { InputDeviceType, KeyboardInput, GamepadInput, type IRuntime } from "@utsp/types";
-import type { IApplication } from "@utsp/runtime-client";
+import { InputDeviceType, KeyboardInput, GamepadInput, type IRuntime, type IApplication } from "@utsp/types";
 
 // ════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -46,6 +45,8 @@ interface SpaceUserData {
     shipX: number;
     shipY: number;
     score: number;
+    lives: number;              // Current life count (usually starts at 3)
+    invincibilityFrames: number; // Ticks remaining for hit recovery period
     gameOver: boolean;
 }
 
@@ -71,13 +72,21 @@ const COLOR_SHIP = 4;
 const COLOR_ASTEROID = 6;
 const COLOR_WHITE = 7;
 const COLOR_GOLD = 8;
-const COLOR_GAMEOVER = 9;
+const COLOR_GAMEOVER = 9;   // Bright red for losing/damage
+const COLOR_LOST_HEART = 10; // Muted gray for depleted lives
 
 // --- Difficulty Progression ---
 const ASTEROIDS_START = 2;       // Initial asteroid count
 const ASTEROIDS_MAX = 10;        // Maximum asteroid count
 const ASTEROIDS_PER_SCORE = 3;   // Add 1 asteroid every N points
 const DIFFICULTY_FULL_AT = 20;   // Score at which center spawns are fully unlocked
+
+// --- Frequency & Movement (aligned for 30Hz grid) ---
+const TICK_RATE = 30;
+const SPEED_SHIP = 1.0;
+const SPEED_ASTEROID = 1.0;
+const SPEED_STARS_FAR = 0.5;
+const SPEED_STARS_NEAR = 1.5;
 
 /**
  * A 3x3 unicolor sprite definition for our spaceship.
@@ -113,6 +122,7 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
             { colorId: 7, r: 255, g: 255, b: 255, a: 255 }, // White text
             { colorId: 8, r: 255, g: 220, b: 100, a: 255 }, // Score gold
             { colorId: 9, r: 255, g: 80, b: 80, a: 255 },   // Game over red
+            { colorId: 10, r: 100, g: 100, b: 100, a: 255 }, // Lost heart gray
         ];
         // Load palette into slot 0 (displays can switch between palette slots)
         core.loadPaletteToSlot(0, palette);
@@ -125,12 +135,12 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
             { spriteId: 0, sizeX: 3, sizeY: 3, data: SHIP_SPRITE },
         ]);
 
-        // Set game simulation speed (60 updates per second)
-        runtime.setTickRate(60);
+        // Set game simulation speed
+        runtime.setTickRate(TICK_RATE);
     }
 
     /**
-     * Step 2: Per-User Initialization
+     * Step 2: Per-User Initialization 
      * Called when a new player connects. Here we set up their unique state,
      * layers and display.
      */
@@ -141,11 +151,11 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
             new Vector2(0, 0),  // Position offset (usually 0,0)
             0,                   // Z-index: 0 = furthest back
             WIDTH, HEIGHT,       // Layer dimensions
-            true                 // Supports transparency
+            { mustBeReliable: false, name: "starLayerFar" } // Must be reliable for transport (server -> client)
         );
-        const starLayerNear = new Layer(new Vector2(0, 0), 1, WIDTH, HEIGHT, true);
-        const gameLayer = new Layer(new Vector2(0, 0), 2, WIDTH, HEIGHT, true);
-        const uiLayer = new Layer(new Vector2(0, 0), 3, WIDTH, HEIGHT, true); // 3 = topmost
+        const starLayerNear = new Layer(new Vector2(0, 0), 1, WIDTH, HEIGHT, { mustBeReliable: false, name: "starLayerNear" });
+        const gameLayer = new Layer(new Vector2(0, 0), 2, WIDTH, HEIGHT, { mustBeReliable: true, name: "gameLayer" });
+        const uiLayer = new Layer(new Vector2(0, 0), 3, WIDTH, HEIGHT, { mustBeReliable: true, name: "uiLayer" }); // 3 = topmost
 
         // Register layers with the user
         user.addLayer(starLayerFar);
@@ -175,6 +185,8 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
             shipX: 10,
             shipY: HEIGHT / 2,
             score: 0,
+            lives: 3,               // Start with 3 hearts
+            invincibilityFrames: 0, // No invincibility at start
             gameOver: false,
         };
 
@@ -200,20 +212,35 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
 
         // Handle game over state
         if (state.gameOver) {
-            if (user.getButtonJustPressed("Restart")) this.resetGame(state);
-            this.renderAll(state);
-            return;
+            // --- BANDWIDTH OPTIMIZATION ---
+            // If the game is over, the screen state is static (no movement, no logic changes).
+            // In UTSP, 'layer.commit()' sends the entire layer's orders to the client.
+            // By returning early here, we skip the call to 'renderAll()' and its 'commit()' calls.
+            // The client will simply keep displaying the last received frame (the Game Over screen).
+            // This prevents sending redundant network packets 30 times per second.
+
+            if (user.getButtonJustPressed("Restart")) {
+                this.resetGame(state);
+                // We don't return here so we can immediately process and render the first frame of the new game.
+            } else {
+                return;
+            }
+        }
+
+        // TOCK: Update recovery timer. Decrementing every frame (30 times/sec).
+        if (state.invincibilityFrames > 0) {
+            state.invincibilityFrames--;
         }
 
         // 1. INPUT: Read axis values (-1 to +1) and apply to ship position
         const moveX = user.getAxis("MoveX");
         const moveY = user.getAxis("MoveY");
-        state.shipX = Math.max(1, Math.min(15, state.shipX + moveX * 0.5));
-        state.shipY = Math.max(2, Math.min(HEIGHT - 3, state.shipY + moveY * 0.5));
+        state.shipX = Math.max(1, Math.min(15, state.shipX + moveX * SPEED_SHIP));
+        state.shipY = Math.max(2, Math.min(HEIGHT - 3, state.shipY + moveY * SPEED_SHIP));
 
         // 2. PARALLAX: Scroll star layers at different speeds for depth effect
-        this.scrollStars(state.starsFar, 0.3);   // Slow = far away
-        this.scrollStars(state.starsNear, 0.6);  // Fast = close
+        this.scrollStars(state.starsFar, SPEED_STARS_FAR);   // Slow = far away
+        this.scrollStars(state.starsNear, SPEED_STARS_NEAR);  // Fast = close
 
         // 3. COLLISION: Check ship vs asteroids
         // We floor coordinates because terminal rendering is grid-based
@@ -221,7 +248,7 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
         const shipGridY = Math.floor(state.shipY);
 
         for (const asteroid of state.asteroids) {
-            asteroid.x -= 0.4; // Move asteroid left
+            asteroid.x -= SPEED_ASTEROID; // Move asteroid left
             const asteroidGridX = Math.floor(asteroid.x);
             const asteroidGridY = Math.floor(asteroid.y);
 
@@ -230,7 +257,21 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
             const hitWings = ((asteroidGridY === shipGridY - 1 || asteroidGridY === shipGridY + 1) && asteroidGridX === shipGridX + 1);
 
             if (hitBody || hitWings) {
-                state.gameOver = true;
+                // Only take damage if not currently in recovery (invincible)
+                if (state.invincibilityFrames <= 0) {
+                    state.lives--;
+
+                    if (state.lives <= 0) {
+                        state.gameOver = true;
+                    } else {
+                        // Activate brief recovery period (1 second) to prevent instant multiple hits
+                        state.invincibilityFrames = TICK_RATE;
+
+                        // Recycle the asteroid that hit us immediately
+                        Object.assign(asteroid, this.createAsteroid(state.score));
+                        continue;
+                    }
+                }
             }
 
             // Recycle asteroid when it leaves the screen
@@ -290,6 +331,8 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
         state.shipX = 10;
         state.shipY = HEIGHT / 2;
         state.score = 0;
+        state.lives = 3;
+        state.invincibilityFrames = 0;
         state.gameOver = false;
         // Reset to initial asteroid count
         state.asteroids.length = ASTEROIDS_START;
@@ -390,22 +433,36 @@ export class SpaceDemo implements IApplication<Core, User<SpaceUserData>> {
         }));
         orders.push(OrderBuilder.dotCloudMultiColor(asteroidDots));
 
-        // Ship sprite
+        // --- Ship Sprite ---
         const shipX = Math.floor(state.shipX);
-        const shipY = Math.floor(state.shipY) - 1; // Offset to center sprite on ship position
-        const shipColor = state.gameOver ? COLOR_GAMEOVER : COLOR_SHIP;
-        // sprite(x, y, spriteId, foregroundColor, backgroundColor)
+        const shipY = Math.floor(state.shipY) - 1;
+
+        // Define ship color based on health status
+        let shipColor = COLOR_SHIP;
+        if (state.gameOver) {
+            shipColor = COLOR_GAMEOVER; // Dead ship turns bright red
+        } else if (state.invincibilityFrames > 0) {
+            // ALARM EFFECT: Alternate between blue and red every 5 frames 
+            // when in recovery period. This is an 'alarm' flash.
+            const isRedPhase = Math.floor(state.invincibilityFrames / 5) % 2 === 0;
+            shipColor = isRedPhase ? COLOR_GAMEOVER : COLOR_SHIP;
+        }
+
         orders.push(OrderBuilder.sprite(shipX, shipY, 0, shipColor, TRANSPARENT));
 
         state.gameLayer.setOrders(orders);
-        state.gameLayer.commit();
+        state.gameLayer.commit(); // Send changes to renderer
     }
 
-    /** Render UI: title, score, and game over text */
+    /** Render UI: title, lives, score, and game over text */
     private renderUI(state: SpaceUserData): void {
         const orders: any[] = [
             // text(x, y, string, foregroundColor, backgroundColor)
             OrderBuilder.text(1, 0, "SPACE DEMO", COLOR_WHITE, COLOR_DEEP_SPACE),
+            // Hearts Display: Current health status.
+            // We draw active lives (red) followed by depleted lives (dimmed gray).
+            OrderBuilder.text(1, 1, "♥".repeat(state.lives), COLOR_GAMEOVER, TRANSPARENT),
+            OrderBuilder.text(1 + state.lives, 1, "♥".repeat(3 - state.lives), COLOR_LOST_HEART, TRANSPARENT),
             OrderBuilder.text(WIDTH - 11, 0, `Score: ${state.score}`, COLOR_GOLD, COLOR_DEEP_SPACE),
         ];
 
